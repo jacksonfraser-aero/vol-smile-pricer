@@ -1,25 +1,21 @@
 # Vol Smile Pricer
 
-## Motivation
-Links back to the IB essay — one sentence stating the essay's own
-admission that Black-Scholes doesn't adjust for non-constant volatility.
-Link the essay/PDF if you have it in the repo or link out to it.
+A pricing project that starts where my IB Extended Essay left off. The essay derived Black-Scholes but also pointed out its own weak spot — it assumes volatility is constant, which isn't true in real markets. This project builds that gap into something you can actually see and trade around, instead of just stating it as a limitation.
 
-## What this project does
-Short paragraph: builds the standard pricer, then empirically shows
-where it breaks (the smile), fits a model for it, and quantifies
-the P&L cost of ignoring it via delta-hedging simulation.
+Plan is: build the standard pricer first, then pull real options data and show the constant-vol assumption breaking down (the "smile"), fit a model to it, and measure what it actually costs in P&L if you ignore it and hedge with the wrong assumption instead.
 
-## Phases
-1. BS + binomial tree + Greeks (baseline)
-2. Implied vol extraction from real option chains (Newton-Raphson)
-3. Smile fitting (quadratic / SVI)
-4. Delta-hedging P&L: flat-vol vs smile-implied
-5. (optional) feed into kelly-betting-simulator market-making pricing
+## Roughly how it's structured
 
-## Status
-Phase 1 in progress.
+1. Black-Scholes closed-form pricer, binomial tree, and the Greeks — the baseline model
+2. Pull an options chain and back out implied vol per strike using Newton-Raphson — this is where the flat-vol assumption gets shown to be wrong
+3. Fit a curve to the smile (quadratic or SVI)
+4. Simulate delta-hedging with flat vol vs. smile-implied vol and compare the P&L
+5. (if time) feed the smile-implied vol into my other project, [kelly-betting-simulator](link), which currently prices market-making spreads off a flat assumption
 
 ## Stack
-C++ (pricing/hedging engine) + Python (data pull, smile fitting) —
-mirrors research-in-Python / production-in-C++ split at real desks.
+
+C++ for the pricer, binomial tree, Greeks and the hedging simulation. Python for pulling data and fitting the smile. Basically research in Python, engine in C++.
+
+## Status
+
+Just getting started — pricer skeleton and test setup are in, nothing computes real numbers yet.
