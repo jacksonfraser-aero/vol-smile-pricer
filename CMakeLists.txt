@@ -10,5 +10,8 @@ add_library(pricer_lib
 )
 target_include_directories(pricer_lib PUBLIC include)
 
+add_executable(convergence_test src/convergence_test.cpp)
+target_link_libraries(convergence_test PRIVATE pricer_lib)
+
 enable_testing()
 add_subdirectory(tests)
