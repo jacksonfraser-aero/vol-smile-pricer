@@ -35,3 +35,22 @@ TEST_CASE("Deep ITM call approaches intrinsic value", "[pricing]") {
     BlackScholes bs(200.0, 50.0, 0.01, 0.05, 0.2);
     REQUIRE(bs.callPrice() == Approx(150.0).epsilon(0.05));
 }
+
+TEST_CASE("Greeks match known values for standard case", "[greeks]") {
+    BlackScholes bs(42.0, 40.0, 0.5, 0.10, 0.20);
+
+    REQUIRE(bs.delta(true) == Approx(0.7791).epsilon(0.01));
+    REQUIRE(bs.delta(false) == Approx(-0.2209).epsilon(0.01));
+    REQUIRE(bs.gamma() == Approx(0.0498).epsilon(0.02));
+    REQUIRE(bs.vega() == Approx(8.813).epsilon(0.02));
+}
+
+TEST_CASE("Call delta approaches 1 deep ITM", "[greeks]") {
+    BlackScholes bs(200.0, 50.0, 0.5, 0.05, 0.2);
+    REQUIRE(bs.delta(true) == Approx(1.0).epsilon(0.01));
+}
+
+TEST_CASE("Put delta approaches -1 deep ITM", "[greeks]") {
+    BlackScholes bs(20.0, 200.0, 0.5, 0.05, 0.2);
+    REQUIRE(bs.delta(false) == Approx(-1.0).epsilon(0.01));
+}

@@ -7,14 +7,17 @@ public:
     double callPrice() const;
     double putPrice() const;
 
+    double delta(bool isCall) const;
+    double gamma() const;
+    double vega() const;
+    double theta(bool isCall) const;
+    double rho(bool isCall) const;
+
 private:
-    double S_;      // spot price
-    double K_;      // strike
-    double T_;      // time to expiry (years)
-    double r_;       // risk-free rate
-    double sigma_;   // volatility
+    double S_, K_, T_, r_, sigma_;
 
     double d1() const;
     double d2() const;
     static double normCDF(double x);
+    static double normPDF(double x);
 };
