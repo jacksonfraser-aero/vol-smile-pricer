@@ -3,6 +3,16 @@
 #include <cmath>
 #include <iostream>
 
+// Fitted quadratic from Day 6's smile-fitting (src/fit_smile.py output).
+// Replace these three with the actual printed coefficients:
+//   Fit: IV(K) = a*K^2 + b*K + c
+double smileImpliedVol(double strike) {
+    double a = 2.267419e-05;
+    double b = -1.468070e-02;
+    double c = 2.6491;
+    return a * strike * strike + b * strike + c;
+}
+
 DeltaHedger::DeltaHedger(double K, double T_total, double r, double sigma, bool isCall)
     : K_(K), T_total_(T_total), r_(r), sigma_(sigma), isCall_(isCall) {}
 
@@ -16,7 +26,7 @@ std::vector<HedgeStep> DeltaHedger::simulate(const std::vector<double>& prices, 
 
     double cash = premium;   // cash from selling the option
     double heldShares = 0.0;
-    double dt = (T_total_) / (n - 1);  // time per step, in years
+    double dt = T_total_ / (n - 1);  // time per step, in years
 
     for (int i = 0; i < n; ++i) {
         double timeRemaining = T_total_ - i * dt;

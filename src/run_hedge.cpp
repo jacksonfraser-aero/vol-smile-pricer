@@ -8,8 +8,7 @@ std::vector<double> loadPrices(const std::string& path) {
     std::vector<double> prices;
     std::ifstream file(path);
     std::string line;
-    std::getline(file, line); // skip header
-
+    std::getline(file, line);
     while (std::getline(file, line)) {
         std::stringstream ss(line);
         std::string dateStr, closeStr;
@@ -24,22 +23,30 @@ int main() {
     std::vector<double> prices = loadPrices("data/price_history.csv");
     std::cout << "Loaded " << prices.size() << " price points\n";
 
-    double K = 310.0;       
-    double T = 26.0 / 365.0; 
+    double K = 350.0;
+    double T = 26.0 / 365.0;
     double r = 0.05;
-    double sigma = 0.27;    
+    double flatSigma = 0.27;
+    double smileSigma = smileImpliedVol(K);
 
-    DeltaHedger hedger(K, T, r, sigma, true);
-    auto results = hedger.simulate(prices);
+    std::cout << "Flat vol: " << flatSigma << ", smile-implied vol at K=" << K << ": " << smileSigma << "\n";
 
-    std::ofstream out("data/hedge_flatvol.csv");
-    out << "step,spot,delta,cash,portfolio_value\n";
-    for (size_t i = 0; i < results.size(); ++i) {
-        out << i << "," << results[i].spot << "," << results[i].delta << ","
-            << results[i].cashPosition << "," << results[i].portfolioValue << "\n";
+    DeltaHedger hedgerFlat(K, T, r, flatSigma, true);
+    auto resultsFlat = hedgerFlat.simulate(prices);
+
+    DeltaHedger hedgerSmile(K, T, r, smileSigma, true);
+    auto resultsSmile = hedgerSmile.simulate(prices);
+
+    std::ofstream out("data/hedge_comparison.csv");
+    out << "step,spot,flat_delta,flat_portfolio,smile_delta,smile_portfolio\n";
+    for (size_t i = 0; i < resultsFlat.size(); ++i) {
+        out << i << "," << resultsFlat[i].spot << ","
+            << resultsFlat[i].delta << "," << resultsFlat[i].portfolioValue << ","
+            << resultsSmile[i].delta << "," << resultsSmile[i].portfolioValue << "\n";
     }
 
-    std::cout << "Final P&L (flat vol hedge): " << hedger.finalPnL() << "\n";
-    std::cout << "Wrote data/hedge_flatvol.csv\n";
+    std::cout << "Final P&L (flat vol):   " << hedgerFlat.finalPnL() << "\n";
+    std::cout << "Final P&L (smile vol):  " << hedgerSmile.finalPnL() << "\n";
+    std::cout << "Wrote data/hedge_comparison.csv\n";
     return 0;
 }
