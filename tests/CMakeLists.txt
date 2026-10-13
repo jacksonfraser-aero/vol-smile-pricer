@@ -1,4 +1,7 @@
-add_executable(pricer_tests test_black_scholes.cpp)
+add_executable(pricer_tests
+    test_black_scholes.cpp
+    test_binomial_tree.cpp
+)
 target_link_libraries(pricer_tests PRIVATE pricer_lib)
 target_include_directories(pricer_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 
