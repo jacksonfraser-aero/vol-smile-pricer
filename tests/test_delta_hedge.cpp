@@ -47,3 +47,30 @@ TEST_CASE("Hedge is self-financing at every rebalance", "[hedge][self-financing]
         }
     }
 }
+
+TEST_CASE("Hedging P&L dispersion falls as rebalancing frequency rises", "[hedge][frequency]") {
+    // Realised vol equals pricing vol, so hedging error comes only from discrete rebalancing and
+    // should scale as 1/sqrt(N): each 4x increase in N roughly halves the std dev (observed
+    // ratios 0.49-0.52 at 200 paths). Requiring < 0.75 asserts a real fall with headroom.
+    const double S0 = 100.0, K = 100.0, T = 0.25, r = 0.05, sigma = 0.2;
+    const int paths = 200;
+    const double maxRatio = 0.75;
+
+    auto pnlStdDev = [&](int steps) {
+        double sum = 0.0, sumSq = 0.0;
+        for (int k = 0; k < paths; ++k) {
+            DeltaHedger hedger(K, T, r, sigma, true);
+            hedger.simulate(gbmPath(S0, r, sigma, T, steps, 1000 + k));
+            sum += hedger.finalPnL();
+            sumSq += hedger.finalPnL() * hedger.finalPnL();
+        }
+        double mean = sum / paths;
+        return std::sqrt(sumSq / paths - mean * mean);
+    };
+
+    double sd10 = pnlStdDev(10), sd40 = pnlStdDev(40), sd160 = pnlStdDev(160);
+    INFO("P&L std dev: N=10 " << sd10 << ", N=40 " << sd40 << ", N=160 " << sd160);
+
+    REQUIRE(sd40 < maxRatio * sd10);
+    REQUIRE(sd160 < maxRatio * sd40);
+}
