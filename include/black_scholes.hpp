@@ -10,6 +10,7 @@ public:
     double delta(bool isCall) const;
     double gamma() const;
     double vega() const;
+    // Theta is dV/dt in calendar time (= -dV/dT), per year, not per day.
     double theta(bool isCall) const;
     double rho(bool isCall) const;
 
