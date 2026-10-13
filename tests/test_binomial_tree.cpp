@@ -1,5 +1,6 @@
 #include "catch.hpp"
 #include "binomial_tree.hpp"
+#include <algorithm>
 #include <cmath>
 
 // Reference Black-Scholes prices for S=K=100, T=1, r=0.05, sigma=0.2 (Hull, standard ATM example).
@@ -33,5 +34,27 @@ TEST_CASE("Put-call parity holds for binomial European prices", "[binomial][pari
         double put = BinomialTree(S, K, T, r, sigma, steps, false).price();
         INFO("K = " << K << ", C - P = " << call - put);
         REQUIRE(call - put == Approx(S - K * std::exp(-r * T)).margin(1e-9));
+    }
+}
+
+TEST_CASE("Binomial prices respect no-arbitrage bounds", "[binomial][bounds]") {
+    const double S = 100.0, r = 0.05;
+    const int steps = 200;
+
+    for (double K : {20.0, 80.0, 100.0, 120.0, 500.0}) {
+        const double tol = 1e-12 * std::max(S, K); // floating-point slack, scaled to price magnitude
+        for (double T : {0.01, 0.5, 5.0}) {
+            for (double sigma : {0.05, 0.3, 1.0}) {
+                double call = BinomialTree(S, K, T, r, sigma, steps, true).price();
+                double put = BinomialTree(S, K, T, r, sigma, steps, false).price();
+                double pvK = K * std::exp(-r * T);
+                INFO("K=" << K << " T=" << T << " sigma=" << sigma << " C=" << call << " P=" << put);
+
+                REQUIRE(call >= std::max(S - pvK, 0.0) - tol);
+                REQUIRE(call <= S + tol);
+                REQUIRE(put >= std::max(pvK - S, 0.0) - tol);
+                REQUIRE(put <= pvK + tol);
+            }
+        }
     }
 }

@@ -2,6 +2,7 @@
 #include "catch.hpp"
 #include "black_scholes.hpp"
 #include "binomial_tree.hpp"
+#include <algorithm>
 
 TEST_CASE("Binomial tree call roughly matches BS pricer", "[binomial]") {
     BinomialTree tree(42.0, 40.0, 0.5, 0.10, 0.20, 500, true);
@@ -61,5 +62,26 @@ TEST_CASE("Put-call parity holds for ITM and OTM strikes", "[pricing][parity]") 
         BlackScholes bs(S, K, T, r, sigma);
         INFO("K = " << K);
         REQUIRE(bs.callPrice() - bs.putPrice() == Approx(S - K * std::exp(-r * T)).margin(1e-10));
+    }
+}
+
+TEST_CASE("Prices respect no-arbitrage bounds", "[pricing][bounds]") {
+    const double S = 100.0, r = 0.05;
+
+    for (double K : {20.0, 80.0, 100.0, 120.0, 500.0}) {
+        const double tol = 1e-12 * std::max(S, K); // floating-point slack, scaled to price magnitude
+        for (double T : {0.01, 0.5, 5.0}) {
+            for (double sigma : {0.05, 0.3, 1.0}) {
+                BlackScholes bs(S, K, T, r, sigma);
+                double call = bs.callPrice(), put = bs.putPrice();
+                double pvK = K * std::exp(-r * T);
+                INFO("K=" << K << " T=" << T << " sigma=" << sigma << " C=" << call << " P=" << put);
+
+                REQUIRE(call >= std::max(S - pvK, 0.0) - tol);
+                REQUIRE(call <= S + tol);
+                REQUIRE(put >= std::max(pvK - S, 0.0) - tol);
+                REQUIRE(put <= pvK + tol);
+            }
+        }
     }
 }
