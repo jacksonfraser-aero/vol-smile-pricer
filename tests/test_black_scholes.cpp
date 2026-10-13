@@ -54,3 +54,12 @@ TEST_CASE("Put delta approaches -1 deep ITM", "[greeks]") {
     BlackScholes bs(20.0, 200.0, 0.5, 0.05, 0.2);
     REQUIRE(bs.delta(false) == Approx(-1.0).epsilon(0.01));
 }
+TEST_CASE("Put-call parity holds for ITM and OTM strikes", "[pricing][parity]") {
+    const double S = 100.0, T = 0.75, r = 0.04, sigma = 0.3;
+
+    for (double K : {70.0, 130.0}) {
+        BlackScholes bs(S, K, T, r, sigma);
+        INFO("K = " << K);
+        REQUIRE(bs.callPrice() - bs.putPrice() == Approx(S - K * std::exp(-r * T)).margin(1e-10));
+    }
+}

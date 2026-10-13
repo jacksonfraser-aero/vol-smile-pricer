@@ -23,3 +23,15 @@ TEST_CASE("Binomial European prices converge to Black-Scholes as steps increase"
         REQUIRE(e2000 < 1e-3);
     }
 }
+
+TEST_CASE("Put-call parity holds for binomial European prices", "[binomial][parity]") {
+    const double S = 100.0, T = 0.75, r = 0.04, sigma = 0.3;
+    const int steps = 300;
+
+    for (double K : {70.0, 100.0, 130.0}) {
+        double call = BinomialTree(S, K, T, r, sigma, steps, true).price();
+        double put = BinomialTree(S, K, T, r, sigma, steps, false).price();
+        INFO("K = " << K << ", C - P = " << call - put);
+        REQUIRE(call - put == Approx(S - K * std::exp(-r * T)).margin(1e-9));
+    }
+}
