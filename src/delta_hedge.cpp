@@ -35,15 +35,15 @@ std::vector<HedgeStep> DeltaHedger::simulate(const std::vector<double>& prices, 
         BlackScholes bs(prices[i], K_, timeRemaining, r_, sigma_);
         double delta = bs.delta(isCall_);
 
+        // accrue interest on cash at the risk-free rate over the step just elapsed
+        if (i > 0) {
+            cash *= std::exp(r_ * dt);
+        }
+
         // rebalance: buy/sell shares to match new delta
         double shareChange = delta - heldShares;
         cash -= shareChange * prices[i];   // pay for shares bought (or receive for sold)
         heldShares = delta;
-
-        // accrue interest on cash at the risk-free rate for one step
-        if (i > 0) {
-            cash *= std::exp(r_ * dt);
-        }
 
         double portfolioValue = cash + heldShares * prices[i];
 
