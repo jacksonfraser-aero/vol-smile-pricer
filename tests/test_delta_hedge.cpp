@@ -74,3 +74,16 @@ TEST_CASE("Hedging P&L dispersion falls as rebalancing frequency rises", "[hedge
     REQUIRE(sd40 < maxRatio * sd10);
     REQUIRE(sd160 < maxRatio * sd40);
 }
+
+TEST_CASE("Hedger rebalances once per input price", "[hedge][rebalances]") {
+    const double S0 = 100.0, K = 100.0, T = 0.25, r = 0.05, sigma = 0.2;
+
+    for (int steps : {1, 10, 63}) {
+        const auto path = gbmPath(S0, r, sigma, T, steps, 7);
+        DeltaHedger hedger(K, T, r, sigma, true);
+        auto rows = hedger.simulate(path);
+
+        INFO(path.size() << "-point path");
+        REQUIRE(rows.size() == path.size());
+    }
+}

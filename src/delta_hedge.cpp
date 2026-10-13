@@ -16,7 +16,7 @@ double smileImpliedVol(double strike) {
 DeltaHedger::DeltaHedger(double K, double T_total, double r, double sigma, bool isCall)
     : K_(K), T_total_(T_total), r_(r), sigma_(sigma), isCall_(isCall) {}
 
-std::vector<HedgeStep> DeltaHedger::simulate(const std::vector<double>& prices, int stepsPerDay) {
+std::vector<HedgeStep> DeltaHedger::simulate(const std::vector<double>& prices) {
     std::vector<HedgeStep> results;
     int n = prices.size();
 

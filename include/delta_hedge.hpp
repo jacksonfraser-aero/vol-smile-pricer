@@ -13,7 +13,8 @@ struct HedgeStep {
 class DeltaHedger {
 public:
     DeltaHedger(double K, double T_total, double r, double sigma, bool isCall);
-    std::vector<HedgeStep> simulate(const std::vector<double>& prices, int stepsPerDay = 1);
+    // Rebalances once per input price: frequency is determined by the input path's spacing.
+    std::vector<HedgeStep> simulate(const std::vector<double>& prices);
     double finalPnL() const;
 
 private:
