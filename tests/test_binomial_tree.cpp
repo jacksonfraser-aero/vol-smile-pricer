@@ -7,7 +7,11 @@
 static const double kBsAtmCall = 10.450583572185565;
 static const double kBsAtmPut = 5.573526022256971;
 
-TEST_CASE("Binomial European prices converge to Black-Scholes as steps increase", "[binomial][convergence]") {
+// CRR converges at first order: error(N) * N stays bounded. Observed error * N is ~2.0 for even N
+// at this ATM point (1.9946 at N=50 rising to 1.9997 at N=4000); 3.0 leaves 50% headroom.
+static const double kMaxErrorTimesSteps = 3.0;
+
+TEST_CASE("Binomial European prices converge to Black-Scholes at first order", "[binomial][convergence]") {
     const double S = 100.0, K = 100.0, T = 1.0, r = 0.05, sigma = 0.2;
 
     for (bool isCall : {true, false}) {
@@ -16,12 +20,11 @@ TEST_CASE("Binomial European prices converge to Black-Scholes as steps increase"
             return std::abs(BinomialTree(S, K, T, r, sigma, steps, isCall).price() - reference);
         };
 
-        double e50 = error(50), e500 = error(500), e2000 = error(2000);
-        INFO((isCall ? "call" : "put") << " errors: N=50 " << e50 << ", N=500 " << e500 << ", N=2000 " << e2000);
-
-        REQUIRE(e500 < e50);
-        REQUIRE(e2000 < e500);
-        REQUIRE(e2000 < 1e-3);
+        for (int steps : {50, 100, 500, 1000, 2000, 4000}) {
+            INFO((isCall ? "call" : "put") << " N=" << steps << " error*N=" << error(steps) * steps);
+            REQUIRE(error(steps) * steps < kMaxErrorTimesSteps);
+        }
+        REQUIRE(error(4000) < error(1000));
     }
 }
 
