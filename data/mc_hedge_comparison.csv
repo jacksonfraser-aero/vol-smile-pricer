@@ -1,0 +1,3 @@
+scenario,realised_vol,flat_mean,flat_sd,smile_mean,smile_sd,diff_mean,diff_se,sd_ratio_smile_over_flat
+"A: realised = smile-implied",0.288443,-0.0269615,1.13532,-0.0340281,1.09123,-0.00706661,0.00537967,0.961164
+"B: realised = flat",0.27,0.20454,0.935482,0.198217,0.944781,-0.00632353,0.00504099,1.00994

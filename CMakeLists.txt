@@ -17,5 +17,8 @@ target_link_libraries(convergence_test PRIVATE pricer_lib)
 add_executable(run_hedge src/run_hedge.cpp)
 target_link_libraries(run_hedge PRIVATE pricer_lib)
 
+add_executable(mc_hedge_comparison src/mc_hedge_comparison.cpp)
+target_link_libraries(mc_hedge_comparison PRIVATE pricer_lib)
+
 enable_testing()
 add_subdirectory(tests)
