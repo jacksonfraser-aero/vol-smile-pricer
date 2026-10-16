@@ -87,3 +87,23 @@ TEST_CASE("Hedger rebalances once per input price", "[hedge][rebalances]") {
         REQUIRE(rows.size() == path.size());
     }
 }
+
+TEST_CASE("Premium vol and hedge vol are independent", "[hedge][premium]") {
+    // Hedgers that sell at the same premium vol start with the same book value (premium received),
+    // whatever vol they hedge with. Step-0 cash alone differs, since it is net of the delta-0 share
+    // purchase, which depends on the hedge vol.
+    const double S0 = 100.0, K = 100.0, T = 0.25, r = 0.05, premiumSigma = 0.25;
+    const auto path = gbmPath(S0, r, 0.2, T, 63, 11);
+
+    DeltaHedger reference(K, T, r, premiumSigma, true);
+    DeltaHedger lowHedgeVol(K, T, r, 0.15, true, premiumSigma);
+    DeltaHedger highHedgeVol(K, T, r, 0.40, true, premiumSigma);
+
+    auto ref = reference.simulate(path);
+    auto low = lowHedgeVol.simulate(path);
+    auto high = highHedgeVol.simulate(path);
+
+    REQUIRE(low[0].portfolioValue == Approx(ref[0].portfolioValue).epsilon(0).margin(1e-12));
+    REQUIRE(high[0].portfolioValue == Approx(ref[0].portfolioValue).epsilon(0).margin(1e-12));
+    REQUIRE(low[0].delta != Approx(high[0].delta));
+}

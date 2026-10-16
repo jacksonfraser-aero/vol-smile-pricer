@@ -31,10 +31,12 @@ int main() {
 
     std::cout << "Flat vol: " << flatSigma << ", smile-implied vol at K=" << K << ": " << smileSigma << "\n";
 
-    DeltaHedger hedgerFlat(K, T, r, flatSigma, true);
+    // Both hedgers sell at the market (smile-implied) price; only the hedge vol differs,
+    // so the P&L gap reflects hedging quality rather than a premium difference.
+    DeltaHedger hedgerFlat(K, T, r, flatSigma, true, smileSigma);
     auto resultsFlat = hedgerFlat.simulate(prices);
 
-    DeltaHedger hedgerSmile(K, T, r, smileSigma, true);
+    DeltaHedger hedgerSmile(K, T, r, smileSigma, true, smileSigma);
     auto resultsSmile = hedgerSmile.simulate(prices);
 
     std::ofstream out("data/hedge_comparison.csv");

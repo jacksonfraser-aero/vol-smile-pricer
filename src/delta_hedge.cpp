@@ -13,15 +13,17 @@ double smileImpliedVol(double strike) {
     return a * strike * strike + b * strike + c;
 }
 
-DeltaHedger::DeltaHedger(double K, double T_total, double r, double sigma, bool isCall)
-    : K_(K), T_total_(T_total), r_(r), sigma_(sigma), isCall_(isCall) {}
+DeltaHedger::DeltaHedger(double K, double T_total, double r, double sigma, bool isCall,
+                         std::optional<double> premiumSigma)
+    : K_(K), T_total_(T_total), r_(r), sigma_(sigma), premiumSigma_(premiumSigma.value_or(sigma)),
+      isCall_(isCall) {}
 
 std::vector<HedgeStep> DeltaHedger::simulate(const std::vector<double>& prices) {
     std::vector<HedgeStep> results;
     int n = prices.size();
 
     // sell one option at t=0, collect the premium
-    BlackScholes bs0(prices[0], K_, T_total_, r_, sigma_);
+    BlackScholes bs0(prices[0], K_, T_total_, r_, premiumSigma_);
     double premium = isCall_ ? bs0.callPrice() : bs0.putPrice();
 
     double cash = premium;   // cash from selling the option
