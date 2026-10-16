@@ -2,7 +2,7 @@
 
 A pricing project that picks up where my IB EE left off. While deriving Black-Scholes in the EE, I emphasised its biggest limitation: it says volatility is fixed, but it's not in the real world. Here, I take that key flaw and turn it into something visible that can be actively traded, rather than just a known weakness.
 
-What we were supposed to do: start with the standard pricer, then show real options data and why the constant-vol assumption breaks down (the "smile"), then fit a model to it and then show what it would actually cost to P&L if you ignore it and hedge using the wrong assumption.
+What we were supposed to do: start with the standard pricer, then show real options data and why the constant-vol assumption breaks down (the "smile"), then fit a model to it and then test what it would actually cost to P&L if you ignore it and hedge using the wrong assumption.
 
 ## Structure
 
@@ -30,21 +30,32 @@ $$IV(K) = 2.267419 \times 10^{-5} \cdot K^2 - 1.468070 \times 10^{-2} \cdot K + 
 
 RMSE of 0.0139 (1.4 vol pts) on the ~31 market-implied points.
 
-### P&L from delta-hedging: flat vol and smile-implied vol
+### P&L of the delta-hedge: flat vol and smile-implied vol
 
-Simulated hedge of a short AAPL call, K=350, on a 19-trading-day historical price path to expiry. Compared two hedging methods:
+Simulated hedge of a short AAPL call, K=350, on a 19-trading-day historical price path to expiry. The two hedges sell the option at the same market price (the smile-implied vol at K=350). They only differ in the vol they use for the delta calculation:
 
-- **Flat vol (0.27):** the constant-volatility assumption that my essay's model makes
-- **Smile-implied vol (0.288):** the implied volatility that my fitted smile gives at K=350
+- **Flat vol (0.27):** the constant volatility that my essay's model assumes
+- **Smile-implied vol (0.288):** the implied volatility that my fitted smile produces at K=350
 
 | | Final P&L |
 |---|---|
-| Flat vol hedge | $0.264 |
+| Flat vol hedge | $0.497 |
 | Smile-implied vol hedge | $0.508 |
 
-K=350 is comfortably away from the smile minimum, which means the flat 0.27 estimate is too low by about 1.8 vol points at that level in terms of market-implied vols. On this path, hedging with the smile-implied delta yielded a more accurate hedge of the option, finishing about $0.24 ahead of the flat-vol hedge at expiry (for a position of the size of one contract). For an institutional-sized position, that is the true cost of my constant-vol assumption.
+My initial take on this comparison had the smile hedge ending up $0.24 ahead, but it was an apples-to-oranges comparison: each hedger sold the option at its own vol, so the smile hedger received about $0.23 more premium at the start. That premium difference amounted to roughly 95% of the gap. At the same selling price, the gap on this path is $0.012.
 
-Fitted smile available at `plots/vol_smile_fitted.png`. Full hedging path available at `plots/hedge_pnl_comparison.png`.
+One path won't tell you much, so I repeated this comparison over 2,000 simulated GBM paths (19 rebalances, same random paths for both hedges), once with the smile vol as the true realised vol, once with the flat vol as the truth:
+
+| Realised vol | Smile less flat, average P&L (SE) | P&L std dev ratio (smile / flat) |
+|---|---|---|
+| 0.288 (smile is right) | -0.0071 (0.0054) | 0.961 |
+| 0.270 (flat is right) | -0.0063 (0.0050) | 1.010 |
+
+The hedge vol makes no measurable difference to the average P&L: both differences are within about 1.3 standard errors of zero. Hedging at the true vol does reduce the dispersion of P&L, as theory expects, but only by 1 to 4%, since with 19 rebalances the noise from discrete hedging (P&L standard deviation of ~1.0) is much larger than the effect of a 1.8 vol point difference. In practice, P&L depends on the premium relative to realised vol: when the option is written at 0.288 and the stock realises 0.27, both hedges make about $0.20 on average.
+
+So at daily rebalancing, the smile matters for what you sell the option for, not how you hedge it.
+
+Fitted smile at `plots/vol_smile_fitted.png`. Full hedging path at `plots/hedge_pnl_comparison.png`. Monte Carlo results at `data/mc_hedge_comparison.csv` (run `build/mc_hedge_comparison`).
 
 ## Testing
 
@@ -59,6 +70,8 @@ There is a Catch2 suite (`tests/`, run with `cmake --build build && ctest --test
 
 That self-financing test caught a real bug: the hedger was being rebalanced before interest was earned, so every trade earned interest for the interval before it actually happened. Moving the order of events brought the final P&L numbers down by around half a cent.
 
+A separate test checks that premium vol and hedge vol can be set independently, which guards the fix for the premium contamination in my original flat vs smile comparison (explained in the hedging results above).
+
 ## Status
 
-All phases 1-4 finished. Kelly project tie-in to be done if time available in phase 5.
+All phases 1-4 finished, plus a Monte Carlo check of the hedging comparison. Kelly project tie-in to be done if time available in phase 5.
