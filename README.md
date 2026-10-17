@@ -1,5 +1,7 @@
 # Vol Smile Pricer
 
+![tests](https://github.com/jacksonfraser-aero/vol-smile-pricer/actions/workflows/tests.yml/badge.svg)
+
 A pricing project that picks up where my IB EE left off. While deriving Black-Scholes in the EE, I emphasised its biggest limitation: it says volatility is fixed, but it's not in the real world. Here, I take that key flaw and turn it into something visible that can be actively traded, rather than just a known weakness.
 
 What we were supposed to do: start with the standard pricer, then show real options data and why the constant-vol assumption breaks down (the "smile"), then fit a model to it and then test what it would actually cost to P&L if you ignore it and hedge using the wrong assumption.
