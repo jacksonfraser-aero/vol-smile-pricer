@@ -5,13 +5,16 @@ from datetime import datetime
 from implied_vol import implied_vol_newton
 
 RISK_FREE_RATE = 0.05  # rough approximation; refine later if time allows
+# when data/options_chain.csv was pulled; fixed so T (and the IVs) don't drift with the run date.
+# .days floors the 25d 6h to expiry, giving T = 25/365 as in the original run.
+VALUATION_DATE = datetime(2026, 8, 2, 17, 51)
 
 df = pd.read_csv("data/options_chain.csv")
 calls = df[df["type"] == "call"].copy()
 
 spot = calls["spot"].iloc[0]
 expiry_date = datetime.strptime(calls["expiry"].iloc[0], "%Y-%m-%d")
-T = (expiry_date - datetime.now()).days / 365.0
+T = (expiry_date - VALUATION_DATE).days / 365.0
 
 calls = calls[(calls["bid"] > 0) & (calls["ask"] > 0)]
 calls = calls[
