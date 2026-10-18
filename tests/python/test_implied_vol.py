@@ -56,3 +56,18 @@ def test_implied_vol_recovers_sigma_or_returns_nan():
     assert wrong == [], f"{len(wrong)} grid points returned a wrong sigma:\n" + "\n".join(
         f"K={K} T={T} sigma={s}: price={p:.6g} recovered={r:.6g}" for K, T, s, p, r in wrong
     )
+
+
+def test_implied_vol_returns_nan_outside_no_arbitrage_bounds():
+    S = 100.0
+    not_nan = []
+    for K, T in itertools.product(STRIKES, EXPIRIES):
+        lower = max(S - K * np.exp(-R * T), 0.0)
+        for price in [lower - 1e-6, lower - 1.0, S + 1e-6, S + 1.0, 2 * S]:
+            recovered = implied_vol_newton(price, S, K, T, R)
+            if not np.isnan(recovered):
+                not_nan.append((K, T, lower, price, recovered))
+    assert not_nan == [], "\n".join(
+        f"K={K} T={T}: lower={lo:.12g} S={S} price={p:.12g} recovered={r:.6g}"
+        for K, T, lo, p, r in not_nan
+    )
