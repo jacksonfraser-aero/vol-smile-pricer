@@ -4,6 +4,11 @@ Fits N=2 (lambda, sigma1, sigma2), N=3 (5 free parameters) and shifted N=2 (alph
 parameters) mixtures by least squares on implied vols, compares them with the bid-ask IV band,
 then checks every fitted smile for butterfly and call-spread arbitrage via the Breeden-Litzenberger
 density exp(rT) * d2C/dK2 on a fine strike grid.
+
+The shifted fit is reported twice: with alpha >= 0 (S_T >= alpha*S*exp(rT) >= 0, so the price
+stays positive) and with alpha free. Free, the fit improves monotonically as alpha -> -inf, where
+the shifted lognormal mixture tends to a normal (Bachelier) mixture; the alpha profile is saved to
+data/shift_profile.csv.
 """
 from datetime import datetime
 
@@ -46,15 +51,21 @@ print(f"S = {S!r}, r = {r}, T = {T!r} ({(expiry_date - VALUATION_DATE).days}/365
 ALPHA_MAX = 0.5 * np.exp(-r * T)
 
 
-def unpack(x, n, shifted):
+def unpack(x, n, shift):
     # first n-1 entries are weight logits (last component's logit pinned at 0), then n log-sigmas,
-    # then (shifted only) y with alpha = ALPHA_MAX - exp(y). Clip logits so no weight underflows
-    # to exactly 0 (validation requires lambda > 0).
+    # then, if shifted, y with alpha = ALPHA_MAX - exp(y) (shift="free", alpha < ALPHA_MAX) or
+    # alpha = ALPHA_MAX * logistic(y) (shift="positive", 0 <= alpha < ALPHA_MAX). Clip logits so
+    # no weight underflows to exactly 0 (validation requires lambda > 0).
     logits = np.append(np.clip(x[: n - 1], -30, 30), 0.0)
     weights = np.exp(logits - logits.max())
     lambdas = weights / weights.sum()  # for n=2 this is the logistic of x[0]
     sigmas = np.exp(x[n - 1 : 2 * n - 1])
-    alpha = ALPHA_MAX - np.exp(x[2 * n - 1]) if shifted else 0.0
+    if shift == "free":
+        alpha = ALPHA_MAX - np.exp(x[2 * n - 1])
+    elif shift == "positive":
+        alpha = ALPHA_MAX / (1 + np.exp(-x[2 * n - 1]))
+    else:
+        alpha = 0.0
     return alpha, lambdas, sigmas
 
 
@@ -70,25 +81,39 @@ def mixture_ivs(K, alpha, lambdas, sigmas, guesses):
     ])
 
 
-def residuals(x, n, shifted):
-    alpha, lambdas, sigmas = unpack(x, n, shifted)
+def prob_negative(alpha, lambdas, sigmas):
+    # S_T = floor + X_T with floor = alpha*S*exp(rT); for alpha < 0, S_T < 0 exactly when X_T < -floor
+    floor = alpha * S * np.exp(r * T)
+    if floor >= 0:
+        return 0.0
+    x0 = (1 - alpha) * S
+    return sum(
+        lam * norm.cdf((np.log(-floor / x0) - (r - 0.5 * sig**2) * T) / (sig * np.sqrt(T)))
+        for lam, sig in zip(lambdas, sigmas)
+    )
+
+
+def residuals(x, n, shift):
+    alpha, lambdas, sigmas = unpack(x, n, shift)
     res = mixture_ivs(strikes, alpha, lambdas, sigmas, market_ivs) - market_ivs
     return np.where(np.isnan(res), NAN_PENALTY, res)
 
 
-def fit_mixture(n, rng, shifted=False):
+def fit_mixture(n, rng, shift=None):
     fits = []
     for _ in range(N_STARTS):
         x0 = np.concatenate([rng.uniform(-3, 3, n - 1), np.log(rng.uniform(0.05, 1.0, n))])
-        if shifted:
+        if shift == "free":
             x0 = np.append(x0, np.log(ALPHA_MAX - rng.uniform(-0.5, 0.45)))
-        fits.append(least_squares(residuals, x0, args=(n, shifted), x_scale=1.0))
+        elif shift == "positive":
+            x0 = np.append(x0, rng.uniform(-3, 3))
+        fits.append(least_squares(residuals, x0, args=(n, shift), x_scale=1.0))
     best = min(fits, key=lambda f: f.cost)
     costs = np.array([f.cost for f in fits])
     n_at_best = np.sum(costs <= best.cost * (1 + 1e-6) + 1e-14)
-    label = f"shifted N={n}" if shifted else f"N={n}"
+    label = f"shifted ({shift}) N={n}" if shift else f"N={n}"
     print(f"{label}: {N_STARTS} starts, {n_at_best} reached the best cost {best.cost:.6e}")
-    alpha, lambdas, sigmas = unpack(best.x, n, shifted)
+    alpha, lambdas, sigmas = unpack(best.x, n, shift)
     order = np.argsort(sigmas)
     return alpha, lambdas[order], sigmas[order]
 
@@ -99,17 +124,55 @@ fits = {
     "quadratic": dict(n_params=3, iv=lambda K: np.polyval(quad_coeffs, K),
                       params=f"a={quad_coeffs[0]:.6e}, b={quad_coeffs[1]:.6e}, c={quad_coeffs[2]:.6f}"),
 }
-for name, n, shifted in [("mixture N=2", 2, False), ("mixture N=3", 3, False),
-                         ("shifted N=2", 2, True)]:
-    alpha, lambdas, sigmas = fit_mixture(n, rng, shifted)
+SHIFTED_POSITIVE = "shifted N=2, alpha>=0"
+SHIFTED_FREE = "shifted N=2, free (->normal)"
+# the free shift is fitted before the positive one so the random starts of the earlier fits
+# are unchanged
+for name, n, shift in [("mixture N=2", 2, None), ("mixture N=3", 3, None),
+                       (SHIFTED_FREE, 2, "free"), (SHIFTED_POSITIVE, 2, "positive")]:
+    alpha, lambdas, sigmas = fit_mixture(n, rng, shift)
     fits[name] = dict(
-        n_params=2 * n - 1 + shifted, alpha=alpha, lambdas=lambdas, sigmas=sigmas,
+        n_params=2 * n - 1 + (shift is not None), alpha=alpha, lambdas=lambdas, sigmas=sigmas,
         iv=lambda K, a=alpha, l=lambdas, s=sigmas: mixture_ivs(
             np.atleast_1d(K), a, l, s, np.full(np.size(K), 0.3)),
-        params=(f"alpha={alpha:.6f}, " if shifted else "")
+        params=(f"alpha={alpha:.6g}, " if shift else "")
                + "lambdas=[" + ", ".join(f"{v:.6f}" for v in lambdas)
                + "], sigmas=[" + ", ".join(f"{v:.6f}" for v in sigmas) + "]",
     )
+
+fits = {k: fits[k] for k in ["quadratic", "mixture N=2", "mixture N=3", SHIFTED_POSITIVE, SHIFTED_FREE]}
+
+# --- alpha profile of the free shift: fix alpha, refit (lambda, sigmas) ----------------------
+
+PROFILE_ALPHAS = [0.0, -1.0, -5.0, -20.0, fits[SHIFTED_FREE]["alpha"], -1000.0]
+
+
+def profile_residuals(x, alpha):
+    lam = 1 / (1 + np.exp(-np.clip(x[0], -30, 30)))
+    res = mixture_ivs(strikes, alpha, np.array([lam, 1 - lam]), np.exp(x[1:]), market_ivs) - market_ivs
+    return np.where(np.isnan(res), NAN_PENALTY, res)
+
+
+# Two warm starts per alpha, each keeping a fitted solution's per-component dollar vol
+# sigma_i * X0: the free-shift fit and the unshifted N=2 fit. Near alpha = 0 the free-shift start
+# alone falls into a slightly worse local minimum, so keep whichever refit is better.
+warm_starts = [fits[SHIFTED_FREE], fits["mixture N=2"]]
+profile = []
+for alpha in PROFILE_ALPHAS:
+    refits = []
+    for start in warm_starts:
+        abs_vols = start["sigmas"] * (1 - start["alpha"]) * S
+        x0 = np.r_[np.log(start["lambdas"][0] / start["lambdas"][1]), np.log(abs_vols / ((1 - alpha) * S))]
+        refits.append(least_squares(profile_residuals, x0, args=(alpha,)))
+    f = min(refits, key=lambda f: f.cost)
+    lam = 1 / (1 + np.exp(-f.x[0]))
+    profile.append(dict(alpha=alpha, rmse=np.sqrt(np.mean(f.fun**2)), lambda1=lam,
+                        sigma1=np.exp(f.x[1]), sigma2=np.exp(f.x[2])))
+profile = pd.DataFrame(profile)
+profile.to_csv("data/shift_profile.csv", index=False)
+print("\nFree-shift profile (alpha fixed, lambda and sigmas refitted):")
+print(profile.to_string(index=False, float_format=lambda v: f"{v:.6g}"))
+print("Saved data/shift_profile.csv")
 
 # --- bid-ask band ------------------------------------------------------------------------
 
@@ -133,14 +196,18 @@ def inside_band(fitted_ivs):
 # --- comparison table --------------------------------------------------------------------
 
 print("\nFit quality (errors in vol points, 31 strikes)")
-print(f"{'model':<14}{'params':>7}{'RMSE':>10}{'max |err|':>11}{'in bid-ask':>12}  fitted parameters")
+print(f"{'model':<30}{'params':>7}{'RMSE':>10}{'max |err|':>11}{'in bid-ask':>12}  fitted parameters")
 for name, fit in fits.items():
     fit["fitted_ivs"] = fit["iv"](strikes)
     err = fit["fitted_ivs"] - market_ivs
     fit["in_band"] = inside_band(fit["fitted_ivs"])
     in_band = f"{fit['in_band'].sum()}/{len(strikes)}"
-    print(f"{name:<14}{fit['n_params']:>7}{np.sqrt(np.mean(err**2)):>10.4f}"
+    print(f"{name:<30}{fit['n_params']:>7}{np.sqrt(np.mean(err**2)):>10.4f}"
           f"{np.max(np.abs(err)):>11.4f}{in_band:>12}  {fit['params']}")
+free = fits[SHIFTED_FREE]
+print(f"  '{SHIFTED_FREE}' is approaching the normal-mixture (Bachelier) limit: alpha is unbounded\n"
+      f"  below and RMSE keeps falling as alpha -> -inf (profile above). P(S_T < 0) = "
+      f"{prob_negative(free['alpha'], free['lambdas'], free['sigmas']):.3e}")
 
 # --- arbitrage check: Breeden-Litzenberger density on a fine grid ---------------------------
 
@@ -172,29 +239,24 @@ for name, fit in fits.items():
         verdict = f"NEGATIVE on {runs}"
     else:
         verdict = "non-negative everywhere"
-    print(f"  {name:<14} min density {density.min():.3e}; integral over grid {mass:.6f}; {verdict}")
+    print(f"  {name:<30} min density {density.min():.3e}; integral over grid {mass:.6f}; {verdict}")
     # Call-spread check: the implied CDF 1 + exp(rT) dC/dK must stay in [0, 1], i.e. calls can't
     # get dearer as the strike rises. A positive density can still break this (mass > 1).
     slope = np.exp(r * T) * np.diff(calls) / dK
     rising = np.flatnonzero(slope > 0)
     if rising.size:
-        print(f"  {'':<14} CALL SPREAD ARBITRAGE: call price rises with strike for K >= "
+        print(f"  {'':<30} CALL SPREAD ARBITRAGE: call price rises with strike for K >= "
               f"{grid[rising[0]]:.2f} (max implied CDF {1 + slope.max():.6f})")
     else:
-        print(f"  {'':<14} call price non-increasing in strike (implied CDF in [0, 1])")
+        print(f"  {'':<30} call price non-increasing in strike (implied CDF in [0, 1])")
     if name != "quadratic":
         # density of S_T = floor + X_T is the mixture density of X_T at K - floor
         floor = fit["alpha"] * S * np.exp(r * T)
         exact = mixture_density((1 - fit["alpha"]) * S, inner - floor, T, r, fit["lambdas"], fit["sigmas"])
-        print(f"  {'':<14} (max |FD - analytic mixture density| = {np.max(np.abs(density - exact)):.2e})")
+        print(f"  {'':<30} (max |FD - analytic mixture density| = {np.max(np.abs(density - exact)):.2e})")
         if floor < 0:
-            # negative shift: S_T < 0 exactly when X_T < -floor
-            x0 = (1 - fit["alpha"]) * S
-            p_negative = sum(
-                lam * norm.cdf((np.log(-floor / x0) - (r - 0.5 * sig**2) * T) / (sig * np.sqrt(T)))
-                for lam, sig in zip(fit["lambdas"], fit["sigmas"])
-            )
-            print(f"  {'':<14} negative shift: S_T >= {floor:.2f}, P(S_T < 0) = {p_negative:.3e}")
+            p_negative = prob_negative(fit["alpha"], fit["lambdas"], fit["sigmas"])
+            print(f"  {'':<30} negative shift: S_T >= {floor:.2f}, P(S_T < 0) = {p_negative:.3e}")
 
 # --- outputs --------------------------------------------------------------------------------
 
@@ -206,19 +268,22 @@ pd.DataFrame({
     "quadratic_iv": fits["quadratic"]["fitted_ivs"],
     "mixture2_iv": fits["mixture N=2"]["fitted_ivs"],
     "mixture3_iv": fits["mixture N=3"]["fitted_ivs"],
-    "shifted2_iv": fits["shifted N=2"]["fitted_ivs"],
+    "shifted2_positive_iv": fits[SHIFTED_POSITIVE]["fitted_ivs"],
+    "shifted2_free_iv": fits[SHIFTED_FREE]["fitted_ivs"],
     "quadratic_in_band": fits["quadratic"]["in_band"],
     "mixture2_in_band": fits["mixture N=2"]["in_band"],
     "mixture3_in_band": fits["mixture N=3"]["in_band"],
-    "shifted2_in_band": fits["shifted N=2"]["in_band"],
+    "shifted2_positive_in_band": fits[SHIFTED_POSITIVE]["in_band"],
+    "shifted2_free_in_band": fits[SHIFTED_FREE]["in_band"],
 }).to_csv("data/mixture_fit.csv", index=False)
 print("\nSaved data/mixture_fit.csv")
 
-STYLES = {  # categorical slots 1-4 of the reference palette, plus line style as secondary encoding
+STYLES = {  # categorical slots 1-5 of the reference palette, plus line style as secondary encoding
     "quadratic": dict(color="#2a78d6", linestyle="-"),
     "mixture N=2": dict(color="#eb6834", linestyle="--"),
     "mixture N=3": dict(color="#1baf7a", linestyle=":"),
-    "shifted N=2": dict(color="#eda100", linestyle="-."),
+    SHIFTED_POSITIVE: dict(color="#eda100", linestyle="-."),
+    SHIFTED_FREE: dict(color="#e87ba4", linestyle=(0, (5, 1, 1, 1, 1, 1))),
 }
 fig, (ax_iv, ax_q) = plt.subplots(2, 1, figsize=(9, 9), sharex=True)
 curve_K = np.linspace(strikes.min(), strikes.max(), 300)
