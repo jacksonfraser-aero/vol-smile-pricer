@@ -71,3 +71,23 @@ def test_density_is_non_negative_and_integrates_to_one():
         f"lambdas={l} sigmas={s} T={T}: min density={m:.3g} mass={a:.12g}"
         for l, s, T, m, a in failures
     )
+
+
+def test_second_strike_derivative_of_call_price_recovers_density():
+    # Breeden-Litzenberger: d2C/dK2 = exp(-rT) q(K). Central difference with h = 0.01 has
+    # truncation error ~ h^2/12 * q'''' (well under 1e-6 here) and roundoff ~ eps*S/h^2 ~ 1e-10.
+    S, h = 100.0, 1e-2
+    strikes = range(40, 201, 5)
+    mismatches = []
+    for (lambdas, sigmas), K, T in itertools.product(MIXTURES, strikes, EXPIRIES):
+        c_up = mixture_call_price(S, K + h, T, R, lambdas, sigmas)
+        c_mid = mixture_call_price(S, K, T, R, lambdas, sigmas)
+        c_dn = mixture_call_price(S, K - h, T, R, lambdas, sigmas)
+        fd = np.exp(R * T) * (c_up - 2 * c_mid + c_dn) / h**2
+        q = mixture_density(S, K, T, R, lambdas, sigmas)
+        if not np.isclose(fd, q, rtol=1e-4, atol=1e-7):
+            mismatches.append((lambdas, sigmas, K, T, fd, q))
+    assert mismatches == [], "\n".join(
+        f"lambdas={l} sigmas={s} K={K} T={T}: fd={f:.10g} density={d:.10g}"
+        for l, s, K, T, f, d in mismatches
+    )
