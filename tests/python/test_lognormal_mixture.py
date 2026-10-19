@@ -3,7 +3,7 @@ import itertools
 import numpy as np
 from scipy.integrate import quad
 
-from implied_vol import bs_call_price
+from implied_vol import bs_call_price, implied_vol_newton
 from lognormal_mixture import mixture_call_price, mixture_density, mixture_put_price
 
 R = 0.05
@@ -90,4 +90,28 @@ def test_second_strike_derivative_of_call_price_recovers_density():
     assert mismatches == [], "\n".join(
         f"lambdas={l} sigmas={s} K={K} T={T}: fd={f:.10g} density={d:.10g}"
         for l, s, K, T, f, d in mismatches
+    )
+
+
+def test_mixture_implied_vol_lies_between_component_vols():
+    # The mixture price is a convex combination of BS prices and BS is increasing in sigma, so
+    # the implied vol must lie in [min sigma_i, max sigma_i]. nan (solver declined) is tolerated,
+    # as in test_implied_vol; a finite answer outside the range never is. Slack = solver tol.
+    S, slack = 100.0, 1e-8
+    strikes = range(40, 201, 5)
+    in_range_count, nan_count, outside = 0, 0, []
+    for (lambdas, sigmas), K, T in itertools.product(MIXTURES, strikes, EXPIRIES):
+        price = mixture_call_price(S, K, T, R, lambdas, sigmas)
+        iv = implied_vol_newton(price, S, K, T, R)
+        if np.isnan(iv):
+            nan_count += 1
+        elif min(sigmas) - slack <= iv <= max(sigmas) + slack:
+            in_range_count += 1
+        else:
+            outside.append((lambdas, sigmas, K, T, price, iv))
+    print(f"\nmixture IVs: {in_range_count} in range, {nan_count} nan, {len(outside)} outside")
+    assert in_range_count > 0
+    assert outside == [], "\n".join(
+        f"lambdas={l} sigmas={s} K={K} T={T}: price={p:.10g} iv={v:.10g}"
+        for l, s, K, T, p, v in outside
     )
