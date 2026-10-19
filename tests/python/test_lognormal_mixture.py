@@ -1,6 +1,7 @@
 import itertools
 
 import numpy as np
+import pytest
 from scipy.integrate import quad
 
 from implied_vol import bs_call_price, implied_vol_newton
@@ -137,3 +138,23 @@ def test_mixture_delta_matches_finite_difference_in_spot():
         f"lambdas={l} sigmas={s} K={K} T={T}: delta={d:.10g} fd={f:.10g}"
         for l, s, K, T, d, f in mismatches
     )
+
+
+INVALID_MIXTURES = {
+    "length mismatch": ([0.5, 0.5], [0.2]),
+    "zero lambda": ([0.0, 1.0], [0.2, 0.3]),
+    "negative lambda": ([-0.2, 1.2], [0.2, 0.3]),
+    "lambdas sum above 1": ([0.5, 0.5 + 1e-9], [0.2, 0.3]),
+    "lambdas sum below 1": ([0.4, 0.5], [0.2, 0.3]),
+    "zero sigma": ([0.5, 0.5], [0.0, 0.3]),
+    "negative sigma": ([0.5, 0.5], [0.2, -0.3]),
+}
+PUBLIC_FUNCTIONS = [mixture_call_price, mixture_put_price, mixture_call_delta, mixture_density]
+
+
+@pytest.mark.parametrize("case", INVALID_MIXTURES)
+@pytest.mark.parametrize("fn", PUBLIC_FUNCTIONS, ids=lambda f: f.__name__)
+def test_invalid_mixture_raises_value_error(fn, case):
+    lambdas, sigmas = INVALID_MIXTURES[case]
+    with pytest.raises(ValueError):
+        fn(100.0, 100.0, 0.5, R, lambdas, sigmas)
