@@ -10,6 +10,8 @@ from lognormal_mixture import (
     mixture_call_price,
     mixture_density,
     mixture_put_price,
+    shifted_mixture_call_price,
+    shifted_mixture_put_price,
 )
 
 R = 0.05
@@ -158,3 +160,48 @@ def test_invalid_mixture_raises_value_error(fn, case):
     lambdas, sigmas = INVALID_MIXTURES[case]
     with pytest.raises(ValueError):
         fn(100.0, 100.0, 0.5, R, lambdas, sigmas)
+
+
+def test_zero_shift_reproduces_unshifted_mixture_exactly():
+    S = 100.0
+    mismatches = []
+    for (lambdas, sigmas), K, T in itertools.product(MIXTURES, STRIKES, EXPIRIES):
+        shifted = shifted_mixture_call_price(S, K, T, R, 0.0, lambdas, sigmas)
+        plain = mixture_call_price(S, K, T, R, lambdas, sigmas)
+        if shifted != plain:
+            mismatches.append((lambdas, sigmas, K, T, shifted, plain))
+    assert mismatches == [], "\n".join(
+        f"lambdas={l} sigmas={s} K={K} T={T}: shifted={a!r} unshifted={b!r}"
+        for l, s, K, T, a, b in mismatches
+    )
+
+
+def test_shifted_mixture_satisfies_no_arbitrage_bounds_and_put_call_parity():
+    # Non-negative shifts only: S_T >= alpha*S*exp(rT), so the asset stays non-negative and the
+    # put bound P <= K*exp(-rT) must hold. (A negative shift lets S_T go below zero.)
+    S = 100.0
+    strikes = range(40, 201, 5)  # all above alpha*S*exp(rT) <= 0.3*100*exp(0.1) = 33.2
+    violations = []
+    for (lambdas, sigmas), alpha, K, T in itertools.product(MIXTURES, [0.1, 0.3], strikes, EXPIRIES):
+        C = shifted_mixture_call_price(S, K, T, R, alpha, lambdas, sigmas)
+        P = shifted_mixture_put_price(S, K, T, R, alpha, lambdas, sigmas)
+        forward_intrinsic = S - K * np.exp(-R * T)
+        call_ok = max(forward_intrinsic, 0.0) - 1e-10 <= C <= S + 1e-10
+        put_ok = max(-forward_intrinsic, 0.0) - 1e-10 <= P <= K * np.exp(-R * T) + 1e-10
+        parity_err = (C - P) - forward_intrinsic
+        if not (call_ok and put_ok and abs(parity_err) <= 1e-10):
+            violations.append((lambdas, sigmas, alpha, K, T, C, P, parity_err))
+    assert violations == [], "\n".join(
+        f"lambdas={l} sigmas={s} alpha={a} K={K} T={T}: C={c:.12g} P={p:.12g} parity_err={e:.3g}"
+        for l, s, a, K, T, c, p, e in violations
+    )
+
+
+@pytest.mark.parametrize("fn", [shifted_mixture_call_price, shifted_mixture_put_price],
+                         ids=lambda f: f.__name__)
+def test_shifted_mixture_rejects_strike_at_or_below_shifted_floor(fn):
+    S, T, alpha = 100.0, 1.0, 0.3
+    floor = alpha * S * np.exp(R * T)
+    for K in [floor, floor - 1.0, np.array([50.0, floor - 1.0])]:
+        with pytest.raises(ValueError):
+            fn(S, K, T, R, alpha, [0.5, 0.5], [0.2, 0.3])

@@ -1,7 +1,8 @@
 """Calibrate Brigo-Mercurio lognormal mixtures to the market smile and compare with the quadratic.
 
-Fits N=2 (lambda, sigma1, sigma2) and N=3 (5 free parameters) mixtures by least squares on
-implied vols, then checks every fitted smile for butterfly arbitrage via the Breeden-Litzenberger
+Fits N=2 (lambda, sigma1, sigma2), N=3 (5 free parameters) and shifted N=2 (alpha too, 4 free
+parameters) mixtures by least squares on implied vols, compares them with the bid-ask IV band,
+then checks every fitted smile for butterfly and call-spread arbitrage via the Breeden-Litzenberger
 density exp(rT) * d2C/dK2 on a fine strike grid.
 """
 from datetime import datetime
@@ -10,9 +11,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
+from scipy.stats import norm
 
 from implied_vol import bs_call_price, implied_vol_newton
-from lognormal_mixture import mixture_call_price, mixture_density
+from lognormal_mixture import mixture_density, shifted_mixture_call_price
 
 # S, r and T exactly as src/smile_plot.py builds them (that script writes data/implied_vols.csv
 # and isn't importable without re-running it, so the constants are repeated here).
@@ -37,43 +39,58 @@ assert len(df) == 31 and np.allclose(df["spot"], S), "implied_vols.csv doesn't m
 print(f"S = {S!r}, r = {r}, T = {T!r} ({(expiry_date - VALUATION_DATE).days}/365), rows = {len(df)}")
 
 
-# --- parametrisations: unconstrained x -> (lambdas, sigmas) ---------------------------------
+# --- parametrisations: unconstrained x -> (alpha, lambdas, sigmas) ---------------------------
 
-def unpack(x, n):
-    # first n-1 entries are weight logits (last component's logit pinned at 0), rest log-sigmas.
-    # Clip logits so no weight underflows to exactly 0 (validation requires lambda > 0).
+# Shift bound: every strike used (down to the 0.5*S end of the arbitrage grid) must exceed
+# alpha*S*exp(rT), so alpha < 0.5*exp(-rT).
+ALPHA_MAX = 0.5 * np.exp(-r * T)
+
+
+def unpack(x, n, shifted):
+    # first n-1 entries are weight logits (last component's logit pinned at 0), then n log-sigmas,
+    # then (shifted only) y with alpha = ALPHA_MAX - exp(y). Clip logits so no weight underflows
+    # to exactly 0 (validation requires lambda > 0).
     logits = np.append(np.clip(x[: n - 1], -30, 30), 0.0)
     weights = np.exp(logits - logits.max())
     lambdas = weights / weights.sum()  # for n=2 this is the logistic of x[0]
-    sigmas = np.exp(x[n - 1 :])
-    return lambdas, sigmas
+    sigmas = np.exp(x[n - 1 : 2 * n - 1])
+    alpha = ALPHA_MAX - np.exp(x[2 * n - 1]) if shifted else 0.0
+    return alpha, lambdas, sigmas
 
 
-def mixture_ivs(K, lambdas, sigmas, guesses):
+def mixture_call(K, alpha, lambdas, sigmas):
+    # alpha = 0 is exactly the unshifted mixture (tested in test_lognormal_mixture.py)
+    return shifted_mixture_call_price(S, K, T, r, alpha, lambdas, sigmas)
+
+
+def mixture_ivs(K, alpha, lambdas, sigmas, guesses):
     return np.array([
-        implied_vol_newton(mixture_call_price(S, k, T, r, lambdas, sigmas), S, k, T, r, initial_guess=g)
+        implied_vol_newton(mixture_call(k, alpha, lambdas, sigmas), S, k, T, r, initial_guess=g)
         for k, g in zip(K, guesses)
     ])
 
 
-def residuals(x, n):
-    lambdas, sigmas = unpack(x, n)
-    res = mixture_ivs(strikes, lambdas, sigmas, market_ivs) - market_ivs
+def residuals(x, n, shifted):
+    alpha, lambdas, sigmas = unpack(x, n, shifted)
+    res = mixture_ivs(strikes, alpha, lambdas, sigmas, market_ivs) - market_ivs
     return np.where(np.isnan(res), NAN_PENALTY, res)
 
 
-def fit_mixture(n, rng):
+def fit_mixture(n, rng, shifted=False):
     fits = []
     for _ in range(N_STARTS):
         x0 = np.concatenate([rng.uniform(-3, 3, n - 1), np.log(rng.uniform(0.05, 1.0, n))])
-        fits.append(least_squares(residuals, x0, args=(n,), x_scale=1.0))
+        if shifted:
+            x0 = np.append(x0, np.log(ALPHA_MAX - rng.uniform(-0.5, 0.45)))
+        fits.append(least_squares(residuals, x0, args=(n, shifted), x_scale=1.0))
     best = min(fits, key=lambda f: f.cost)
     costs = np.array([f.cost for f in fits])
     n_at_best = np.sum(costs <= best.cost * (1 + 1e-6) + 1e-14)
-    print(f"N={n}: {N_STARTS} starts, {n_at_best} reached the best cost {best.cost:.6e}")
-    lambdas, sigmas = unpack(best.x, n)
+    label = f"shifted N={n}" if shifted else f"N={n}"
+    print(f"{label}: {N_STARTS} starts, {n_at_best} reached the best cost {best.cost:.6e}")
+    alpha, lambdas, sigmas = unpack(best.x, n, shifted)
     order = np.argsort(sigmas)
-    return lambdas[order], sigmas[order]
+    return alpha, lambdas[order], sigmas[order]
 
 
 rng = np.random.default_rng(0)
@@ -82,12 +99,15 @@ fits = {
     "quadratic": dict(n_params=3, iv=lambda K: np.polyval(quad_coeffs, K),
                       params=f"a={quad_coeffs[0]:.6e}, b={quad_coeffs[1]:.6e}, c={quad_coeffs[2]:.6f}"),
 }
-for n in (2, 3):
-    lambdas, sigmas = fit_mixture(n, rng)
-    fits[f"mixture N={n}"] = dict(
-        n_params=2 * n - 1, lambdas=lambdas, sigmas=sigmas,
-        iv=lambda K, l=lambdas, s=sigmas: mixture_ivs(np.atleast_1d(K), l, s, np.full(np.size(K), 0.3)),
-        params="lambdas=[" + ", ".join(f"{v:.6f}" for v in lambdas)
+for name, n, shifted in [("mixture N=2", 2, False), ("mixture N=3", 3, False),
+                         ("shifted N=2", 2, True)]:
+    alpha, lambdas, sigmas = fit_mixture(n, rng, shifted)
+    fits[name] = dict(
+        n_params=2 * n - 1 + shifted, alpha=alpha, lambdas=lambdas, sigmas=sigmas,
+        iv=lambda K, a=alpha, l=lambdas, s=sigmas: mixture_ivs(
+            np.atleast_1d(K), a, l, s, np.full(np.size(K), 0.3)),
+        params=(f"alpha={alpha:.6f}, " if shifted else "")
+               + "lambdas=[" + ", ".join(f"{v:.6f}" for v in lambdas)
                + "], sigmas=[" + ", ".join(f"{v:.6f}" for v in sigmas) + "]",
     )
 
@@ -136,7 +156,7 @@ for name, fit in fits.items():
             print(f"  {name}: fitted IV <= 0 for some strikes on the grid; BS price undefined there")
         calls = bs_call_price(S, grid, T, r, grid_ivs)
     else:
-        calls = mixture_call_price(S, grid, T, r, fit["lambdas"], fit["sigmas"])
+        calls = mixture_call(grid, fit["alpha"], fit["lambdas"], fit["sigmas"])
     density = np.exp(r * T) * (calls[2:] - 2 * calls[1:-1] + calls[:-2]) / dK**2
     fit["density"] = density
     mass = np.trapezoid(density, inner)
@@ -163,8 +183,18 @@ for name, fit in fits.items():
     else:
         print(f"  {'':<14} call price non-increasing in strike (implied CDF in [0, 1])")
     if name != "quadratic":
-        exact = mixture_density(S, inner, T, r, fit["lambdas"], fit["sigmas"])
+        # density of S_T = floor + X_T is the mixture density of X_T at K - floor
+        floor = fit["alpha"] * S * np.exp(r * T)
+        exact = mixture_density((1 - fit["alpha"]) * S, inner - floor, T, r, fit["lambdas"], fit["sigmas"])
         print(f"  {'':<14} (max |FD - analytic mixture density| = {np.max(np.abs(density - exact)):.2e})")
+        if floor < 0:
+            # negative shift: S_T < 0 exactly when X_T < -floor
+            x0 = (1 - fit["alpha"]) * S
+            p_negative = sum(
+                lam * norm.cdf((np.log(-floor / x0) - (r - 0.5 * sig**2) * T) / (sig * np.sqrt(T)))
+                for lam, sig in zip(fit["lambdas"], fit["sigmas"])
+            )
+            print(f"  {'':<14} negative shift: S_T >= {floor:.2f}, P(S_T < 0) = {p_negative:.3e}")
 
 # --- outputs --------------------------------------------------------------------------------
 
@@ -176,16 +206,19 @@ pd.DataFrame({
     "quadratic_iv": fits["quadratic"]["fitted_ivs"],
     "mixture2_iv": fits["mixture N=2"]["fitted_ivs"],
     "mixture3_iv": fits["mixture N=3"]["fitted_ivs"],
+    "shifted2_iv": fits["shifted N=2"]["fitted_ivs"],
     "quadratic_in_band": fits["quadratic"]["in_band"],
     "mixture2_in_band": fits["mixture N=2"]["in_band"],
     "mixture3_in_band": fits["mixture N=3"]["in_band"],
+    "shifted2_in_band": fits["shifted N=2"]["in_band"],
 }).to_csv("data/mixture_fit.csv", index=False)
 print("\nSaved data/mixture_fit.csv")
 
-STYLES = {  # categorical slots 1-3 of the reference palette, plus line style as secondary encoding
+STYLES = {  # categorical slots 1-4 of the reference palette, plus line style as secondary encoding
     "quadratic": dict(color="#2a78d6", linestyle="-"),
     "mixture N=2": dict(color="#eb6834", linestyle="--"),
     "mixture N=3": dict(color="#1baf7a", linestyle=":"),
+    "shifted N=2": dict(color="#eda100", linestyle="-."),
 }
 fig, (ax_iv, ax_q) = plt.subplots(2, 1, figsize=(9, 9), sharex=True)
 curve_K = np.linspace(strikes.min(), strikes.max(), 300)

@@ -6,6 +6,10 @@ Volatility Smiles", International Journal of Theoretical and Applied Finance 5(4
 The terminal density of S_T is a mixture of lognormal densities, each with the common drift r
 and its own volatility sigma_i, weighted by lambda_i > 0 with sum(lambda_i) = 1. European
 option prices are therefore the same convex combination of Black-Scholes prices.
+
+The shifted model (same paper) adds a deterministic shift: S_t = alpha * S_0 * exp(rt) + X_t, with
+X a lognormal mixture started at X_0 = (1 - alpha) * S_0. A call on S at strike K is a call on X
+at strike K - alpha * S_0 * exp(rT), which must be positive.
 """
 import numpy as np
 from scipy.stats import norm
@@ -60,3 +64,22 @@ def mixture_density(S, K, T, r, lambdas, sigmas):
         s = sigma * np.sqrt(T)
         density = density + lam * norm.pdf((np.log(K) - mu) / s) / (K * s)
     return density
+
+
+def _shift(S, K, T, r, alpha):
+    floor = alpha * S * np.exp(r * T)  # S_T never falls below this
+    if alpha >= 1:
+        raise ValueError(f"alpha must be below 1 so the shifted spot is positive, got {alpha}")
+    if np.any(np.asarray(K) <= floor):
+        raise ValueError(f"every strike must exceed alpha*S*exp(rT) = {floor!r}")
+    return S - alpha * S, K - floor
+
+
+def shifted_mixture_call_price(S, K, T, r, alpha, lambdas, sigmas):
+    X0, K_shifted = _shift(S, K, T, r, alpha)
+    return mixture_call_price(X0, K_shifted, T, r, lambdas, sigmas)
+
+
+def shifted_mixture_put_price(S, K, T, r, alpha, lambdas, sigmas):
+    X0, K_shifted = _shift(S, K, T, r, alpha)
+    return mixture_put_price(X0, K_shifted, T, r, lambdas, sigmas)
