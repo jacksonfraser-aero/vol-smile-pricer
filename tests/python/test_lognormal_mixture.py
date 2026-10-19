@@ -4,7 +4,12 @@ import numpy as np
 from scipy.integrate import quad
 
 from implied_vol import bs_call_price, implied_vol_newton
-from lognormal_mixture import mixture_call_price, mixture_density, mixture_put_price
+from lognormal_mixture import (
+    mixture_call_delta,
+    mixture_call_price,
+    mixture_density,
+    mixture_put_price,
+)
 
 R = 0.05
 STRIKES = [60, 80, 90, 100, 110, 120, 160]
@@ -114,4 +119,21 @@ def test_mixture_implied_vol_lies_between_component_vols():
     assert outside == [], "\n".join(
         f"lambdas={l} sigmas={s} K={K} T={T}: price={p:.10g} iv={v:.10g}"
         for l, s, K, T, p, v in outside
+    )
+
+
+def test_mixture_delta_matches_finite_difference_in_spot():
+    S, h = 100.0, 1e-4
+    strikes = range(40, 201, 5)
+    mismatches = []
+    for (lambdas, sigmas), K, T in itertools.product(MIXTURES[:3], strikes, EXPIRIES):
+        c_up = mixture_call_price(S + h, K, T, R, lambdas, sigmas)
+        c_dn = mixture_call_price(S - h, K, T, R, lambdas, sigmas)
+        fd = (c_up - c_dn) / (2 * h)
+        delta = mixture_call_delta(S, K, T, R, lambdas, sigmas)
+        if not np.isclose(delta, fd, rtol=1e-6, atol=1e-8):
+            mismatches.append((lambdas, sigmas, K, T, delta, fd))
+    assert mismatches == [], "\n".join(
+        f"lambdas={l} sigmas={s} K={K} T={T}: delta={d:.10g} fd={f:.10g}"
+        for l, s, K, T, d, f in mismatches
     )
