@@ -91,15 +91,36 @@ for n in (2, 3):
                + "], sigmas=[" + ", ".join(f"{v:.6f}" for v in sigmas) + "]",
     )
 
+# --- bid-ask band ------------------------------------------------------------------------
+
+quotes = chain_calls.set_index("strike").loc[strikes, ["bid", "ask"]]
+bids, asks = quotes["bid"].values, quotes["ask"].values
+bid_ivs = np.array([implied_vol_newton(b, S, k, T, r) for b, k in zip(bids, strikes)])
+ask_ivs = np.array([implied_vol_newton(a, S, k, T, r) for a, k in zip(asks, strikes)])
+both = ~np.isnan(bid_ivs) & ~np.isnan(ask_ivs)
+print(f"\nBid-ask IVs: {np.isnan(bid_ivs).sum()} bid and {np.isnan(ask_ivs).sum()} ask without an IV "
+      f"(quote outside no-arbitrage bounds); median width {np.median(ask_ivs[both] - bid_ivs[both]):.4f} "
+      f"vol points over the {both.sum()} strikes with both")
+
+
+def inside_band(fitted_ivs):
+    # Compared in price space so a bid below intrinsic (nan IV) still counts as a lower edge;
+    # BS is increasing in sigma, so this is the IV band wherever both IVs exist.
+    prices = bs_call_price(S, strikes, T, r, fitted_ivs)
+    return (bids <= prices) & (prices <= asks)
+
+
 # --- comparison table --------------------------------------------------------------------
 
 print("\nFit quality (errors in vol points, 31 strikes)")
-print(f"{'model':<14}{'params':>7}{'RMSE':>10}{'max |err|':>11}  fitted parameters")
+print(f"{'model':<14}{'params':>7}{'RMSE':>10}{'max |err|':>11}{'in bid-ask':>12}  fitted parameters")
 for name, fit in fits.items():
-    err = fit["iv"](strikes) - market_ivs
     fit["fitted_ivs"] = fit["iv"](strikes)
+    err = fit["fitted_ivs"] - market_ivs
+    fit["in_band"] = inside_band(fit["fitted_ivs"])
+    in_band = f"{fit['in_band'].sum()}/{len(strikes)}"
     print(f"{name:<14}{fit['n_params']:>7}{np.sqrt(np.mean(err**2)):>10.4f}"
-          f"{np.max(np.abs(err)):>11.4f}  {fit['params']}")
+          f"{np.max(np.abs(err)):>11.4f}{in_band:>12}  {fit['params']}")
 
 # --- arbitrage check: Breeden-Litzenberger density on a fine grid ---------------------------
 
@@ -150,9 +171,14 @@ for name, fit in fits.items():
 pd.DataFrame({
     "strike": strikes,
     "market_iv": market_ivs,
+    "bid_iv": bid_ivs,
+    "ask_iv": ask_ivs,
     "quadratic_iv": fits["quadratic"]["fitted_ivs"],
     "mixture2_iv": fits["mixture N=2"]["fitted_ivs"],
     "mixture3_iv": fits["mixture N=3"]["fitted_ivs"],
+    "quadratic_in_band": fits["quadratic"]["in_band"],
+    "mixture2_in_band": fits["mixture N=2"]["in_band"],
+    "mixture3_in_band": fits["mixture N=3"]["in_band"],
 }).to_csv("data/mixture_fit.csv", index=False)
 print("\nSaved data/mixture_fit.csv")
 
